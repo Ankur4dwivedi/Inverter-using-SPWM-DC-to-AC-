@@ -1,0 +1,117 @@
+// =====================================================================
+//  Arduino UNO full-bridge SPWM, 2x IR2101, complementary switching
+//  Hardware dead time (phase-correct PWM). 50 Hz output, ~31.4 kHz carrier.
+//
+//  PINS (UNO)
+//    D9   (OC1A)  HIN_A -> IC #1 pin 2   (Q1, leg A high side)
+//    D10  (OC1B)  LIN_A -> IC #1 pin 3   (Q2, leg A low side)
+//    D11  (OC2A)  HIN_B -> IC #2 pin 2   (Q3, leg B high side)
+//    D3   (OC2B)  LIN_B -> IC #2 pin 3   (Q4, leg B low side)
+//    Arduino GND -> both IC COM pins and the MOSFET sources
+//
+//  HOW IT WORKS
+//    Leg A duty = 50% + sine,  Leg B duty = 50% - sine  (exact opposite)
+//    Output = midpoint A - midpoint B = sine at 50 Hz (after the LC filter)
+//    In each leg the low side is the complement of the high side, with a
+//    dead-time gap DT made by the timer hardware (so HIN and LIN of one IC
+//    are never high together).
+//    Timer1 (pins 9,10) and Timer2 (pins 11,3) run at the same frequency:
+//    16 MHz / (2 x 255) = 31.37 kHz.
+//
+//  TEST_MODE 1: Q1 + Q4 held on. Midpoint A to B should read the bus
+//               voltage (use a LOW bus, 12 V).
+//  TEST_MODE 0: normal sine output (soft-start over about 2 seconds).
+//
+//  BEFORE APPLYING THE BUS: with the bus OFF, scope D9 and D10 at
+//  5 us/div. They must be opposite with a small gap, never both high.
+// =====================================================================
+
+#define TEST_MODE 0
+
+const uint8_t HIN_A = 9;
+const uint8_t LIN_A = 10;
+const uint8_t HIN_B = 11;
+const uint8_t LIN_B = 3;
+
+const uint8_t  DT      = 16;    // dead time in timer ticks (16 x 62.5 ns = 1 us)
+const uint8_t  AMP_MAX = 100;   // max swing in counts (max ~105). 100 = ~80%
+const uint32_t PHASE_INC = (uint32_t)(4294967296.0 * 50.0 / 31372.549 + 0.5);
+
+int8_t sineTab[256];
+volatile uint32_t phase = 0;
+volatile uint8_t amp = 0;       // soft start: grows to AMP_MAX
+
+ISR(TIMER1_OVF_vect) {          // once per carrier period
+  uint32_t prev = phase;
+  phase += PHASE_INC;
+  if (phase < prev && amp < AMP_MAX) amp++;   // new 50 Hz cycle: ramp up
+
+  int16_t s  = sineTab[phase >> 24];
+  int16_t sw = (s * (int16_t)amp) / 127;
+  uint8_t dA = 127 + sw;
+  uint8_t dB = 127 - sw;
+
+  OCR1A = dA;           // HIN_A
+  OCR1B = dA + DT;      // LIN_A (inverted output: gap of DT after HIN_A falls)
+  OCR2A = dB;           // HIN_B
+  OCR2B = dB + DT;      // LIN_B
+}
+
+void setup() {
+  pinMode(HIN_A, OUTPUT);
+  pinMode(LIN_A, OUTPUT);
+  pinMode(HIN_B, OUTPUT);
+  pinMode(LIN_B, OUTPUT);
+  digitalWrite(HIN_A, LOW);
+  digitalWrite(LIN_A, LOW);
+  digitalWrite(HIN_B, LOW);
+  digitalWrite(LIN_B, LOW);
+
+  // Charge both bootstrap capacitors: low sides on for 300 ms
+  digitalWrite(LIN_A, HIGH);
+  digitalWrite(LIN_B, HIGH);
+  delay(300);
+  digitalWrite(LIN_A, LOW);
+  digitalWrite(LIN_B, LOW);
+  delay(10);
+
+#if TEST_MODE == 1
+  digitalWrite(HIN_A, HIGH);     // Q1 on
+  digitalWrite(LIN_B, HIGH);     // Q4 on
+  while (true) { }
+#endif
+
+  for (int i = 0; i < 256; i++) {
+    sineTab[i] = (int8_t)round(127.0 * sin(2.0 * PI * i / 256.0));
+  }
+
+  noInterrupts();
+
+  // Timer1: phase & frequency correct, TOP = ICR1 = 255 (mode 8)
+  // OC1A non-inverting (HIN_A), OC1B inverting (LIN_A)
+  TCCR1A = (1 << COM1A1) | (1 << COM1B1) | (1 << COM1B0);
+  TCCR1B = (1 << WGM13);
+  ICR1   = 255;
+  OCR1A  = 127;
+  OCR1B  = 127 + DT;
+  TCNT1  = 0;
+  TIMSK1 = (1 << TOIE1);
+
+  // Timer2: phase correct, TOP = 255 (mode 1)
+  // OC2A non-inverting (HIN_B), OC2B inverting (LIN_B)
+  TCCR2A = (1 << COM2A1) | (1 << COM2B1) | (1 << COM2B0) | (1 << WGM20);
+  TCCR2B = 0;
+  OCR2A  = 127;
+  OCR2B  = 127 + DT;
+  TCNT2  = 0;
+
+  // Start both timers, prescaler 1
+  TCCR1B |= (1 << CS10);
+  TCCR2B  = (1 << CS20);
+
+  interrupts();
+}
+
+void loop() {
+  // nothing: the timer interrupt does everything
+}
