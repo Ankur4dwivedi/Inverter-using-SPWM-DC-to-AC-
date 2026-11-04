@@ -69,7 +69,7 @@ Component-[4 N channel MOSFETS , 2 MOSFET driver IC (each drives 2 MOSFETS) , on
 
 Hardware Setup
 
-<img width="4080" height="1840" alt="IMG_20261101_194030" src="https://github.com/user-attachments/assets/dab6b8e0-3875-4785-ac56-9bfc69c9a837" />
+<img width="8160" height="6144" alt="IMG_20261103_235606" src="https://github.com/user-attachments/assets/497ccb2d-d55e-47ca-be2e-29b45328398f" />
 
 <img width="8160" height="6144" alt="IMG_20261103_232000" src="https://github.com/user-attachments/assets/2a3fe20b-ddb8-40ba-9fa7-966474341d63" />
 
